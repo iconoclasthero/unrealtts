@@ -1,0 +1,99 @@
+#!/bin/bash
+
+scriptname=$(realpath "$0")
+
+gdu(){ grep Duration|uniq; }
+
+pause(){ read -p "$*" ; }
+
+confirm(){
+ local ans IFS=
+ while
+  printf '%s' "$1"
+  read -rp " " -n1 ans
+   do
+     printf '\n'
+     case $ans in [Yy]) return 0;; [Nn]) return 1;;
+     esac
+   done
+}
+
+editscript() {
+  local script path; script="${scriptname##*/}"; path="${scriptname%/*}"; swp="$path/.$script.swp"
+     if [[ ! -e "$swp" ]]; then printf "\n\n%s\n\n" "$swp"; (/usr/bin/nano "$scriptname"); exit
+     else printf "\n%s is already being edited.\n%s exists; try fg or look in another window.\n" "$scriptname" "$swp"; exit;
+  fi
+}
+
+pause
+
+### --- Main Block --- #######################################################################################################################
+
+
+if [[ "$1" == @(edit|e|nano) ]]; then editscript; fi
+
+t="4m"
+
+cliin=( "$@" )
+for infile in "${cliin[@]}"
+ do
+   echo "$infile"
+   json="${infile%.txt}.json"
+   #out="${infile%.txt}.mp3"
+   #curl --variable text@- -H "Authorization: Bearer $USAPI" --expand-json '{"Text":"{{text:json}}","VoiceId":"Scarlett","Bitrate":"320k","Speed":"0","Pitch":"1.0"}' -o "$json" https://api.v6.unrealspeech.com/synthesisTasks < "$infile"
+
+ if [[ ! -f "$json" ]]
+   then
+     jq -csR '{ Text: ., VoiceId: "Scarlett", Bitrate: "320k", Speed: "0", Pitch: "1.0"}' "$infile" | /bin/curl -H "Authorization: Bearer $USAPI" --json @- --output "$json" https://api.v6.unrealspeech.com/synthesisTasks
+ fi
+
+  #touch "$json"
+  printf "$json"":\n%s" "$(cat "$json")" | tee -a /library/books/tts-work/unrealspeech.log
+done
+
+date
+echo "sleeping $t"
+
+sleep "$t" &&\
+
+for json in "${cliin[@]}"
+ do
+   json="${json%.txt}.json"
+   out="${json%.json}.mp3"
+   if [[ ! -f "$out" && ! -f "${out/mp3/opus}" ]]
+    then
+#      screen -d -m sh -c 'wget -O "${out}" $(jq -r .SynthesisTask.OutputUri "${json}") && opuws.book.4 "${out}"'
+       wget -O "$out" $(jq -r .SynthesisTask.OutputUri "${json}")
+   fi
+ done
+
+opus.book.4 # 2>&1 >/dev/null
+
+for out in "${cliin[@]}"
+ do
+   out="${out/.txt/.mp3}"
+   opusout="${out%.mp3}.opus"
+   printf '%s...  ' "${out%.mp3}"
+   if [[ $(mediainfo "$out"|grep Duration|uniq) == $(mediainfo "$opusout"|grep Duration|uniq) ]]
+    then
+      printf 'durations match: %s removed.\n' "$out"
+      rm "$out"
+    else
+      printf 'durations do not match!\n'
+      tout=$(mediainfo "$out"|grep Duration|uniq)
+      topusout=$(mediainfo "$opusout"|grep Duration|uniq)
+      printf ' .mp3 duration: %s\n' "${tout#*:}"
+      printf '.opus duration: %s\n' "${topusout#*:}"
+	  printf 'Remove %s? (y/n)' "$out"
+      if confirm; then rm "$out"; fi
+   fi
+ done
+printf '\n'
+exit
+
+print "Duration:${tout#*:}"
+echo "Duration:${topusout#*:}"
+
+
+
+#  [[ ${"$i"|mediainfo|gdu) == $("${i/.mp3/.opus}"|mediainfo|gdu) ]] && rm "$out"
